@@ -1,3 +1,5 @@
+@file:Suppress("SpellCheckingInspection")
+
 package com.wsj.ijkplayer.custom
 
 import android.content.Context
@@ -167,24 +169,19 @@ class IJKVideoView : FrameLayout, IJKPlayerControllerCallback {
             setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", "4096")
             setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzeduration", "2000000")
             setOnPreparedListener {
-                Log.e("****IJKVideoView****", "setOnPreparedListener")
                 controller?.run {
                     setVideoDuration(it.duration.div(1000).toInt())
                     setLoading(false)
-                    setPlayingState(true, hide = false)
+                    setPlayingState(true, show = true)
                 }
             }
-            setOnInfoListener { _, what, extra ->
-                Log.e("****IJKVideoView****", "setOnInfoListener----what:$what----extra:$extra")
+            setOnInfoListener { _, what, _ ->
                 if (what == IMediaPlayer.MEDIA_INFO_BUFFERING_START) controller?.setLoading(true)
                 else if (what == IMediaPlayer.MEDIA_INFO_BUFFERING_END) controller?.setLoading(false)
                 false
             }
             setOnSeekCompleteListener {
-                Log.e("****IJKVideoView****", "setOnSeekCompleteListener")
-            }
-            setOnBufferingUpdateListener { _, i ->
-                Log.e("****IJKVideoView****", "setOnInfoListener----i:$i")
+                controller?.setLoading(false)
             }
             setOnErrorListener { _, what, extra ->
                 Log.e("****IJKVideoView****", "setOnErrorListener----what:$what----extra:$extra")
@@ -193,9 +190,6 @@ class IJKVideoView : FrameLayout, IJKPlayerControllerCallback {
             setOnVideoSizeChangedListener { _, width, height, _, _ ->
                 videoAspectRatio = 1F * width / height
                 resizeVideo()
-            }
-            setOnTimedTextListener { _, text ->
-                Log.e("****IJKVideoView****", "setOnTimedTextListener----text:$text")
             }
         }
     }
@@ -213,6 +207,7 @@ class IJKVideoView : FrameLayout, IJKPlayerControllerCallback {
     }
 
     override fun seek(seconds: Int) {
+        controller?.setLoading(true)
         mediaPlayer?.seekTo(seconds * 1000L)
     }
 

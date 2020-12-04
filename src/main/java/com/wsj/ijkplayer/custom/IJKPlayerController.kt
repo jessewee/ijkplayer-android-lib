@@ -1,5 +1,6 @@
 package com.wsj.ijkplayer.custom
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.Configuration
 import android.content.res.TypedArray
@@ -7,7 +8,9 @@ import android.graphics.Color
 import android.text.TextUtils
 import android.util.AttributeSet
 import android.util.TypedValue
+import android.view.GestureDetector
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.widget.*
 import androidx.core.view.setPadding
@@ -22,7 +25,7 @@ class IJKPlayerController : LinearLayout {
     private var stateAnimating = false // 当前控制器是否正在显示或者正在隐藏
     private var topView: View? = null // 顶部的返回按钮和标题等信息
     private var bottomView: View? = null // 底部的控制按钮和进度等信息
-    private var centerView: View? = null // 中间的播放按钮，不在播放状态的时候显示
+    private var centerPlayBtn: ImageView? = null // 中间的播放按钮，不在播放状态的时候显示
     private var loadingView: ProgressBar? = null // 中间的加载动画
     private var titleTv: TextView? = null // 标题
     private var playBtn: ImageView? = null // 播放暂停按钮
@@ -33,7 +36,8 @@ class IJKPlayerController : LinearLayout {
     private var durationTv: TextView? = null // 视频总时长显示
     private var progressTv: TextView? = null // 视频已播放时长显示
     private var seekBar: SeekBar? = null // 进度条
-    private var timer: Timer? = null
+    private var seekBarTracking = false // 拖动进度条时不再根据视频播放进度实时给进度条附值
+    private var timer: Timer? = null // 计时器，用来定时读取播放进度，隐藏控制器
     private var secondsToHide = 3 // 自动隐藏控制器的剩余时间
 
     constructor(context: Context) : this(context, null)
@@ -89,21 +93,26 @@ class IJKPlayerController : LinearLayout {
     }
 
     /** 是否播放中 */
-    fun setPlayingState(playing: Boolean, hide: Boolean = true) {
+    fun setPlayingState(playing: Boolean, show: Boolean? = null) {
         this.playing = playing
-        centerView?.visibility = if (playing) GONE else VISIBLE
+        centerPlayBtn?.visibility = if (playing) GONE else VISIBLE
         playBtn?.setImageResource(if (playing) R.drawable.ic_pause else R.drawable.ic_play)
-        if (playing && hide) hide() else show()
+        when {
+            show == true -> show()
+            show == false -> hide()
+            playing -> hide()
+            else -> show()
+        }
     }
 
     /** 是否加载中 */
     fun setLoading(loading: Boolean) {
         if (loading) {
             loadingView?.visibility = VISIBLE
-            centerView?.visibility = GONE
+            centerPlayBtn?.visibility = GONE
         } else {
             loadingView?.visibility = GONE
-            centerView?.visibility = if (playing) GONE else VISIBLE
+            centerPlayBtn?.visibility = if (playing) GONE else VISIBLE
         }
     }
 
@@ -136,26 +145,54 @@ class IJKPlayerController : LinearLayout {
     }
 
     // 初始化中间的播放按钮，不在播放状态的时候显示，loading
+    @SuppressLint("ClickableViewAccessibility")
     private fun initCenter(density: Float) {
         val centerSize = (60 * density).toInt()
         val loadingSize = (30 * density).toInt()
-        centerView = ImageView(context).apply {
+        // 中间的播放按钮
+        centerPlayBtn = ImageView(context).apply {
             layoutParams = FrameLayout.LayoutParams(centerSize, centerSize)
                 .apply { gravity = Gravity.CENTER }
             visibility = GONE
-            setImageResource(R.drawable.ic_play)
+            setImageResource(R.drawable.ic_play_)
             setClickRipple()
             setOnClickListener { onStartClick() }
         }
+        // 中间的加载动画
         loadingView = ProgressBar(context).apply {
             layoutParams = FrameLayout.LayoutParams(loadingSize, loadingSize)
                 .apply { gravity = Gravity.CENTER }
             visibility = GONE
         }
+        // 中间的父布局
         val centerParent = FrameLayout(context).apply {
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, 0).apply { weight = 1F }
-            setOnClickListener { if (curShowing) hide() else show() }
-            addView(centerView)
+            val gestureDetector = GestureDetector(
+                this.context,
+                object : GestureDetector.SimpleOnGestureListener() {
+                    override fun onDoubleTap(e: MotionEvent?): Boolean {
+                        // 双击播放暂停
+                        if (loadingView?.visibility == VISIBLE) return false
+                        setPlayingState(!playing)
+                        if (playing) callback?.start() else callback?.pause()
+                        return true
+                    }
+
+                    override fun onSingleTapConfirmed(e: MotionEvent?): Boolean {
+                        // 单击显示隐藏
+                        if (curShowing) hide() else show()
+                        return true
+                    }
+
+                    override fun onDown(e: MotionEvent?): Boolean {
+                        return true
+                    }
+                }
+            )
+            setOnTouchListener { _, event ->
+                return@setOnTouchListener gestureDetector.onTouchEvent(event)
+            }
+            addView(centerPlayBtn)
             addView(loadingView)
         }
         addView(centerParent)
@@ -175,6 +212,7 @@ class IJKPlayerController : LinearLayout {
                 setPadding(barImgPadding)
                 setImageResource(R.drawable.ic_play)
                 setOnClickListener {
+                    if (loadingView?.visibility == VISIBLE) return@setOnClickListener
                     if (playing) {
                         setPlayingState(false)
                         callback?.pause()
@@ -196,15 +234,17 @@ class IJKPlayerController : LinearLayout {
             seekBar = SeekBar(context).apply {
                 layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                    override fun onStartTrackingTouch(seekBar: SeekBar) {}
+                    override fun onStartTrackingTouch(seekBar: SeekBar) {
+                        seekBarTracking = true
+                    }
 
                     override fun onProgressChanged(sb: SeekBar, progress: Int, fu: Boolean) {
                         progressTv?.text = progress.formatSeconds()
-                        secondsToHide = 99999999
                     }
 
                     override fun onStopTrackingTouch(seekBar: SeekBar) {
                         callback?.seek(seekBar.progress)
+                        seekBarTracking = false
                         secondsToHide = 3
                     }
                 })
@@ -241,16 +281,17 @@ class IJKPlayerController : LinearLayout {
         timer = Timer().apply {
             schedule(object : TimerTask() {
                 override fun run() {
+                    // 拖动进度条时，不再自动隐藏控制器，不再根据视频播放进度实时给进度条附值
+                    if (seekBarTracking) return
                     // 自动隐藏控制器
                     secondsToHide--
                     if (secondsToHide == 0) post { hide() }
                     // 获取播放进度
-                    if (playing) {
-                        val progress = callback?.getProgress() ?: return
-                        post {
-                            progressTv?.text = progress.formatSeconds()
-                            seekBar?.progress = progress.coerceAtLeast(0)
-                        }
+                    if (!playing) return // 后边没有其他逻辑代码了，直接return吧，少个缩进，以后后边再加代码记得把这个return去掉
+                    val progress = callback?.getProgress() ?: -1
+                    post {
+                        progressTv?.text = progress.formatSeconds()
+                        seekBar?.progress = progress.coerceAtLeast(0)
                     }
                 }
             }, 1000, 1000)
