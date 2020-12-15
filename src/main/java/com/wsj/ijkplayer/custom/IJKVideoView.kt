@@ -11,6 +11,7 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
+import tv.danmaku.ijk.R
 import tv.danmaku.ijk.media.player.IMediaPlayer
 import tv.danmaku.ijk.media.player.IjkMediaPlayer
 
@@ -33,15 +34,21 @@ class IJKVideoView : FrameLayout, IJKPlayerControllerCallback {
 
     constructor(context: Context, attrs: AttributeSet?, defStyleAttr: Int, defStyleRes: Int)
             : super(context, attrs, defStyleAttr, defStyleRes) {
+        // 获取自定义属性
+        val customAttrs = context.obtainStyledAttributes(attrs, R.styleable.IJKVideoView)
+        val showBackBtn = customAttrs.getBoolean(R.styleable.IJKVideoView_showBackBtn, true)
+        val showFullScreenBtn =
+            customAttrs.getBoolean(R.styleable.IJKVideoView_showFullScreenBtn, true)
+        customAttrs.recycle()
+        // 初始化
         setBackgroundColor(Color.BLACK)
         surfaceView = SurfaceView(context).apply {
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
             holder.addCallback(surfaceHolderCallback)
         }
         addView(surfaceView)
-        controller = IJKPlayerController(context).apply {
+        controller = IJKPlayerController(context, showBackBtn, showFullScreenBtn).apply {
             setIJKPlayerControllerCallback(this@IJKVideoView)
-            setLoading(true)
         }
         addView(controller)
     }
@@ -218,6 +225,9 @@ class IJKVideoView : FrameLayout, IJKPlayerControllerCallback {
     override fun getProgress(): Int {
         return mediaPlayer?.currentPosition?.div(1000)?.toInt() ?: -1
     }
+
+    override fun videoValid() =
+        surfaceViewCreated && url?.isNotEmpty() == true && mediaPlayer != null
 }
 
 interface IJKVideoViewCallback {

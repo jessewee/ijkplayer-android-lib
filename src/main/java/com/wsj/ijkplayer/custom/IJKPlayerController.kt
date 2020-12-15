@@ -39,14 +39,29 @@ class IJKPlayerController : LinearLayout {
     private var seekBarTracking = false // 拖动进度条时不再根据视频播放进度实时给进度条附值
     private var timer: Timer? = null // 计时器，用来定时读取播放进度，隐藏控制器
     private var secondsToHide = 3 // 自动隐藏控制器的剩余时间
+    private var showBackBtn: Boolean = true // 是否显示返回按钮
+    private var showFullScreenBtn: Boolean = true // 是否显示全屏按钮
 
-    constructor(context: Context) : this(context, null)
-    constructor(context: Context, attrs: AttributeSet?) : this(context, attrs, 0)
+    constructor(
+        context: Context,
+        showBackBtn: Boolean = true,
+        showFullScreenBtn: Boolean = true
+    ) : super(context) {
+        this.showBackBtn = showBackBtn
+        this.showFullScreenBtn = showFullScreenBtn
+        init()
+    }
+
+    constructor(context: Context, attrs: AttributeSet?) : super(context, attrs) {
+        init()
+    }
+
     constructor(context: Context, attrs: AttributeSet?, defStyleAttr: Int)
-            : this(context, attrs, defStyleAttr, 0)
+            : super(context, attrs, defStyleAttr) {
+        init()
+    }
 
-    constructor(context: Context, attrs: AttributeSet?, defStyleAttr: Int, defStyleRes: Int)
-            : super(context, attrs, defStyleAttr, defStyleRes) {
+    private fun init() {
         orientation = VERTICAL
         val density = context.resources.displayMetrics.density
         val barHeight = (50 * density).toInt()
@@ -124,17 +139,20 @@ class IJKPlayerController : LinearLayout {
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(Color.parseColor("#25101010"))
             // 返回按钮
-            val backBtn = ImageView(context).apply {
-                layoutParams = LayoutParams(barHeight, barHeight)
-                setClickRipple()
-                setPadding(barImgPadding)
-                setImageResource(R.drawable.ic_back_white)
-                setOnClickListener { callback?.back() }
+            if (showBackBtn) {
+                val backBtn = ImageView(context).apply {
+                    layoutParams = LayoutParams(barHeight, barHeight)
+                    setClickRipple()
+                    setPadding(barImgPadding)
+                    setImageResource(R.drawable.ic_back_white)
+                    setOnClickListener { callback?.back() }
+                }
+                addView(backBtn)
             }
-            addView(backBtn)
             // 标题，滚动暂时不做了
             titleTv = TextView(context).apply {
                 layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+                    .apply { if (!showBackBtn) leftMargin = barImgPadding }
                 setTextColor(Color.WHITE)
                 setLines(1)
                 ellipsize = TextUtils.TruncateAt.END
@@ -156,7 +174,7 @@ class IJKPlayerController : LinearLayout {
             visibility = GONE
             setImageResource(R.drawable.ic_play_)
             setClickRipple()
-            setOnClickListener { onStartClick() }
+            setOnClickListener { startOrPause(true) }
         }
         // 中间的加载动画
         loadingView = ProgressBar(context).apply {
@@ -172,9 +190,7 @@ class IJKPlayerController : LinearLayout {
                 object : GestureDetector.SimpleOnGestureListener() {
                     override fun onDoubleTap(e: MotionEvent?): Boolean {
                         // 双击播放暂停
-                        if (loadingView?.visibility == VISIBLE) return false
-                        setPlayingState(!playing)
-                        if (playing) callback?.start() else callback?.pause()
+                        startOrPause(!playing)
                         return true
                     }
 
@@ -211,16 +227,7 @@ class IJKPlayerController : LinearLayout {
                 setClickRipple()
                 setPadding(barImgPadding)
                 setImageResource(R.drawable.ic_play)
-                setOnClickListener {
-                    if (loadingView?.visibility == VISIBLE) return@setOnClickListener
-                    if (playing) {
-                        setPlayingState(false)
-                        callback?.pause()
-                    } else {
-                        setPlayingState(true)
-                        callback?.start()
-                    }
-                }
+                setOnClickListener { startOrPause(!playing) }
             }
             addView(playBtn)
             // 已播放时间
@@ -232,6 +239,7 @@ class IJKPlayerController : LinearLayout {
             addView(progressTv)
             // 进度条
             seekBar = SeekBar(context).apply {
+                max = 0
                 layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                     override fun onStartTrackingTouch(seekBar: SeekBar) {
@@ -243,7 +251,7 @@ class IJKPlayerController : LinearLayout {
                     }
 
                     override fun onStopTrackingTouch(seekBar: SeekBar) {
-                        callback?.seek(seekBar.progress)
+                        if (callback?.videoValid() == true) callback?.seek(seekBar.progress)
                         seekBarTracking = false
                         secondsToHide = 3
                     }
@@ -257,19 +265,22 @@ class IJKPlayerController : LinearLayout {
             // 总时间
             durationTv = TextView(context).apply {
                 layoutParams = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT)
+                    .apply { if (!showFullScreenBtn) rightMargin = barImgPadding }
                 setTextColor(Color.WHITE)
                 text = "--:--"
             }
             addView(durationTv)
             // 全屏按钮
-            fullScreenBtn = ImageView(context).apply {
-                layoutParams = LayoutParams(barHeight, barHeight)
-                setClickRipple()
-                setPadding(barImgPadding)
-                setImageResource(R.drawable.ic_full_screen)
-                setOnClickListener { callback?.fullScreen(!fullScreen) }
+            if (showFullScreenBtn) {
+                fullScreenBtn = ImageView(context).apply {
+                    layoutParams = LayoutParams(barHeight, barHeight)
+                    setClickRipple()
+                    setPadding(barImgPadding)
+                    setImageResource(R.drawable.ic_full_screen)
+                    setOnClickListener { callback?.fullScreen(!fullScreen) }
+                }
+                addView(fullScreenBtn)
             }
-            addView(fullScreenBtn)
         }
         addView(bottomView)
     }
@@ -298,10 +309,17 @@ class IJKPlayerController : LinearLayout {
         }
     }
 
-    // 点播放按钮
-    private fun onStartClick() {
-        setPlayingState(true)
-        callback?.start()
+    // 点播放暂停
+    private fun startOrPause(start: Boolean) {
+        if (callback?.videoValid() != true) return
+        if (loadingView?.visibility == VISIBLE) return
+        if (start) {
+            setPlayingState(true)
+            callback?.start()
+        } else {
+            setPlayingState(false)
+            callback?.pause()
+        }
     }
 
     // 显示控制器
@@ -385,4 +403,5 @@ interface IJKPlayerControllerCallback {
     fun seek(seconds: Int)
     fun fullScreen(fullScreen: Boolean)
     fun getProgress(): Int
+    fun videoValid(): Boolean
 }
